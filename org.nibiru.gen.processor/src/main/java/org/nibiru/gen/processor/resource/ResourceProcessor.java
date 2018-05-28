@@ -1,11 +1,12 @@
 package org.nibiru.gen.processor.resource;
 
+import com.google.common.base.Charsets;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Streams;
+import com.google.common.hash.Hashing;
+import com.google.common.io.BaseEncoding;
 import com.google.common.io.ByteStreams;
-import com.squareup.javapoet.ClassName;
-import com.squareup.javapoet.JavaFile;
-import com.squareup.javapoet.MethodSpec;
-import com.squareup.javapoet.TypeSpec;
+import com.squareup.javapoet.*;
 import org.nibiru.gen.api.resource.Resource;
 import org.nibiru.gen.processor.BaseProcessor;
 
@@ -17,12 +18,17 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.ArrayType;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.ElementFilter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,8 +43,10 @@ public class ResourceProcessor
     @Override
     protected Iterable<JavaFile> generate(Set<? extends Element> elements) {
         Map<TypeElement, TypeSpec.Builder> types = Maps.newHashMap();
-        for (ExecutableElement element : ElementFilter.methodsIn(elements)) {
-            TypeElement typeElement = (TypeElement) element.getEnclosingElement();
+        Map<String, JavaFile> byteArrayResources = Maps.newHashMap();
+        Map<String, JavaFile> stringResources = Maps.newHashMap();
+        for (ExecutableElement executableElement : ElementFilter.methodsIn(elements)) {
+            TypeElement typeElement = (TypeElement) executableElement.getEnclosingElement();
 
             TypeSpec.Builder builder = types.computeIfAbsent(typeElement,
                     (type) -> TypeSpec.classBuilder(type.getSimpleName()
@@ -46,42 +54,198 @@ public class ResourceProcessor
                             .addModifiers(Modifier.PUBLIC)
                             .addSuperinterface(ClassName.get(type)));
 
-            String resourcePath = typeElement.getEnclosingElement()
+            String resourcePath = resolveRelativePaths(typeElement.getEnclosingElement()
                     .toString()
                     .replaceAll("\\.", "/")
                     + "/"
-                    + element.getAnnotation(Resource.class).value();
+                    + executableElement.getAnnotation(Resource.class).value());
 
-            File resourceFile = findFile(resourcePath);
+            TypeMirror returnType = executableElement.getReturnType();
 
-            MethodSpec.Builder methodBuilder = buildMethod(element);
-
-            buildByteArray(methodBuilder, resourceFile);
-            builder.addMethod(methodBuilder.build());
+            JavaFile resource;
+            String propertysufix;
+            if (isByteArray(returnType)) {
+                resource = byteArrayResources.computeIfAbsent(resourcePath,
+                        this::buildByteResourceType);
+                propertysufix = "";
+            } else if (isString(returnType)) {
+                resource = stringResources.computeIfAbsent(resourcePath,
+                        this::buildStringResourceType);
+                propertysufix = ".toString()";
+            } else {
+                throw new IllegalStateException("Invalid return type for resource: "
+                        + returnType
+                        + ". It must be byte[] or String");
+            }
+            buildResourceMethod(executableElement,
+                    builder,
+                    resource.typeSpec,
+                    resourcePath,
+                    propertysufix);
         }
-        return types.entrySet()
-                .stream()
-                .map(e -> buildJavaFile(e.getKey(),
-                        e.getValue()))
+
+        return Streams.concat(types.entrySet()
+                        .stream()
+                        .map(e -> buildJavaFile(e.getKey(),
+                                e.getValue())),
+                byteArrayResources.values()
+                        .stream(),
+                stringResources.values()
+                        .stream())
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
-    private void buildByteArray(MethodSpec.Builder methodBuilder,
-                                @Nullable File resourceFile) {
+    private boolean isString(TypeMirror type) {
+        return type instanceof DeclaredType
+                && String.class
+                .getName()
+                .equals(type.toString());
+    }
+
+    private boolean isByteArray(TypeMirror type) {
+        return type instanceof ArrayType
+                && ((ArrayType) type).getComponentType()
+                .getKind() == TypeKind.BYTE;
+    }
+
+    private JavaFile buildByteResourceType(String resourcePath) {
+        File resourceFile = findFile(resourcePath);
         if (resourceFile != null) {
             try (InputStream in = new FileInputStream(resourceFile)) {
-                methodBuilder.addStatement("byte[] b = new byte[" + resourceFile.length() + "]");
+                TypeSpec.Builder builder = TypeSpec.classBuilder("b" + Hashing.sha256()
+                        .hashString(resourceFile.getName(), Charsets.UTF_8))
+                        .addModifiers(Modifier.PUBLIC);
+
+                builder.addField(FieldSpec.builder(TypeName.get(byte[].class),
+                        "data",
+                        Modifier.PUBLIC,
+                        Modifier.FINAL,
+                        Modifier.STATIC)
+                        .initializer("new byte[" + resourceFile.length() + "]")
+                        .build());
+
+
+                CodeBlock.Builder staticInit = CodeBlock.builder();
+                MethodSpec.Builder currentMethod = MethodSpec.methodBuilder("i0")
+                        .addModifiers(Modifier.STATIC)
+                        .addModifiers(Modifier.PRIVATE);
+
+                int init = 0;
                 int n = 0;
+                int size = 0;
                 for (byte b : ByteStreams.toByteArray(in)) {
-                    methodBuilder.addStatement("b[" + n + "] = " + b);
+                    currentMethod.addStatement("data[" + n + "] = " + b);
                     n++;
+                    size++;
+                    if (size > 1000) {
+                        init++;
+                        MethodSpec methodSpec = currentMethod.build();
+                        staticInit.add(methodSpec.name + "();");
+                        builder.addMethod(methodSpec);
+                        size = 0;
+                        currentMethod = MethodSpec.methodBuilder("i" + init)
+                                .addModifiers(Modifier.STATIC)
+                                .addModifiers(Modifier.PRIVATE);
+                    }
                 }
-                methodBuilder.addStatement("return b");
+                MethodSpec methodSpec = currentMethod.build();
+                staticInit.add(methodSpec.name + "();");
+                builder.addMethod(methodSpec);
+                builder.addStaticBlock(staticInit
+                        .build());
+
+                return JavaFile.builder(getPackage(resourcePath), builder.build())
+                        .build();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         } else {
-            methodBuilder.addStatement("return null");
+            return null;
         }
+    }
+
+    private JavaFile buildStringResourceType(String resourcePath) {
+        File resourceFile = findFile(resourcePath);
+        if (resourceFile != null) {
+            try (InputStream in = new FileInputStream(resourceFile)) {
+                TypeSpec.Builder builder = TypeSpec.classBuilder("s" + Hashing.sha256()
+                        .hashString(resourceFile.getName(), Charsets.UTF_8))
+                        .addModifiers(Modifier.PUBLIC);
+
+                builder.addField(FieldSpec.builder(TypeName.get(StringBuilder.class),
+                        "data",
+                        Modifier.PUBLIC,
+                        Modifier.FINAL,
+                        Modifier.STATIC)
+                        .initializer("new StringBuilder()")
+                        .build());
+
+
+                CodeBlock.Builder staticInit = CodeBlock.builder();
+                MethodSpec.Builder currentMethod = MethodSpec.methodBuilder("i0")
+                        .addModifiers(Modifier.STATIC)
+                        .addModifiers(Modifier.PRIVATE);
+
+                int init = 0;
+                int n = 0;
+                int size = 0;
+                for (char b : BaseEncoding.base64()
+                        .encode(ByteStreams.toByteArray(in))
+                        .toCharArray()) {
+                    currentMethod.addStatement("data.append('" + b + "')");
+                    n++;
+                    size++;
+                    if (size > 1000) {
+                        init++;
+                        MethodSpec methodSpec = currentMethod.build();
+                        staticInit.add(methodSpec.name + "();");
+                        builder.addMethod(methodSpec);
+                        size = 0;
+                        currentMethod = MethodSpec.methodBuilder("i" + init)
+                                .addModifiers(Modifier.STATIC)
+                                .addModifiers(Modifier.PRIVATE);
+                    }
+                }
+                MethodSpec methodSpec = currentMethod.build();
+                staticInit.add(methodSpec.name + "();");
+                builder.addMethod(methodSpec);
+                builder.addStaticBlock(staticInit
+                        .build());
+
+                return JavaFile.builder(getPackage(resourcePath), builder.build())
+                        .build();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            return null;
+        }
+    }
+
+    private void buildResourceMethod(ExecutableElement element,
+                                     TypeSpec.Builder builder,
+                                     @Nullable TypeSpec resourceType,
+                                     @Nullable String resourcePath,
+                                     String propertySufix) {
+        MethodSpec.Builder methodBuilder = buildMethod(element);
+
+        if (resourceType != null && resourcePath != null) {
+            builder.addMethod(methodBuilder.addStatement("return "
+                    + getPackage(resourcePath) + "."
+                    + resourceType.name
+                    + ".data"
+                    + propertySufix)
+                    .build());
+        } else {
+            builder.addMethod(methodBuilder.addStatement("return null")
+                    .build());
+        }
+    }
+
+    private String getPackage(String path) {
+        return path
+                .substring(0, path.lastIndexOf('/'))
+                .replaceAll("/", ".");
     }
 }

@@ -62,8 +62,6 @@ public abstract class BaseProcessor extends AbstractProcessor {
     @Nullable
     protected File findFile(String path) {
         try {
-            path = resolveRelativePaths(path);
-
             File base = new File(processingEnv
                     .getFiler()
                     .getResource(StandardLocation.CLASS_OUTPUT, "", path)
