@@ -1,0 +1,4 @@
+rootProject.name = 'nibiruGen'
+
+include ':org.nibiru.gen.api'
+include ':org.nibiru.gen.processor'

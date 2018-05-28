@@ -1,0 +1,38 @@
+allprojects {
+    group 'io.github.nibiruos.gen'
+    version '1.0-SNAPSHOT'
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven {
+            url "https://oss.sonatype.org/content/repositories/snapshots"
+        }
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'maven'
+    apply plugin: 'maven-publish'
+
+    sourceCompatibility = 1.8
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+            }
+        }
+        repositories {
+            maven {
+                credentials {
+                    username = sonatypeUser
+                    password = sonatypePassword
+                }
+                url "https://oss.sonatype.org/content/repositories/snapshots"
+            }
+        }
+    }
+
+}
