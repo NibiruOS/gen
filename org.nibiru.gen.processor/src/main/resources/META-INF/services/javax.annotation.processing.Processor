@@ -1,1 +1,2 @@
 org.nibiru.gen.processor.i18n.MessagesProcessor
+org.nibiru.gen.processor.resource.ResourceProcessor

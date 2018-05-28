@@ -1,15 +1,18 @@
 package org.nibiru.gen.processor;
 
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
+import com.google.common.collect.Lists;
+import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeSpec;
 
 import javax.annotation.Nullable;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.RoundEnvironment;
-import javax.lang.model.element.TypeElement;
-import javax.lang.model.util.ElementFilter;
+import javax.lang.model.element.*;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardLocation;
@@ -17,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
+import java.util.Deque;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -36,23 +40,21 @@ public abstract class BaseProcessor extends AbstractProcessor {
     @Override
     public boolean process(Set<? extends TypeElement> annotations,
                            RoundEnvironment roundEnv) {
-        for (TypeElement element : ElementFilter.typesIn(roundEnv.getElementsAnnotatedWith(annotationClass))) {
-            try {
-                for (TypeSpec typeSpec : generate(element)) {
+        try {
+            for (JavaFile javaFile : generate(roundEnv.getElementsAnnotatedWith(annotationClass))) {
 
-                    JavaFileObject jfo = processingEnv.getFiler().createSourceFile(
-                            element.getEnclosingElement().toString() + "." + typeSpec.name);
+                JavaFileObject jfo = processingEnv.getFiler()
+                        .createSourceFile(javaFile.packageName
+                                + "."
+                                + javaFile.typeSpec.name);
 
-                    try (Writer file = jfo.openWriter()) {
-                        JavaFile.builder(element.getEnclosingElement().toString(), typeSpec)
-                                .build()
-                                .writeTo(file);
-                        file.flush();
-                    }
+                try (Writer file = jfo.openWriter()) {
+                    javaFile.writeTo(file);
+                    file.flush();
                 }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
             }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
         return true;
     }
@@ -60,11 +62,14 @@ public abstract class BaseProcessor extends AbstractProcessor {
     @Nullable
     protected File findFile(String path) {
         try {
+            path = resolveRelativePaths(path);
+
             File base = new File(processingEnv
                     .getFiler()
                     .getResource(StandardLocation.CLASS_OUTPUT, "", path)
                     .toUri());
 
+            // Go up the same number of levesl as the specief path
             for (String dummy : Splitter.on('/').split(path)) {
                 base = base.getParentFile();
             }
@@ -100,5 +105,43 @@ public abstract class BaseProcessor extends AbstractProcessor {
                 "MESSAGE: " + message);
     }
 
-    protected abstract Iterable<TypeSpec> generate(TypeElement element);
+    protected abstract Iterable<JavaFile> generate(Set<? extends Element> elements);
+
+    protected static MethodSpec.Builder buildMethod(ExecutableElement executableElement) {
+        MethodSpec.Builder methodBuilder = MethodSpec.methodBuilder(executableElement
+                .getSimpleName().toString())
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(Override.class)
+                .returns(ClassName.get(executableElement.getReturnType()));
+        for (VariableElement variableElement : executableElement.getParameters()) {
+            methodBuilder.addParameter(ClassName.get(variableElement.asType()),
+                    variableElement.getSimpleName().toString());
+        }
+
+        return methodBuilder;
+    }
+
+    protected static JavaFile buildJavaFile(TypeElement element,
+                                            TypeSpec.Builder typeBuilder) {
+        return JavaFile.builder(element.getEnclosingElement()
+                        .toString(),
+                typeBuilder.build())
+                .build();
+    }
+
+    protected static String resolveRelativePaths(String path) {
+
+        Deque<String> pathStack = Lists.newLinkedList();
+        for (String segment : Splitter.on('/').split(path)) {
+            if (segment.equals(".")) {
+                // do nothing
+            } else if (segment.equals("..")) {
+                pathStack.removeLast();
+            } else {
+                pathStack.addLast(segment);
+            }
+        }
+
+        return Joiner.on('/').join(pathStack);
+    }
 }
