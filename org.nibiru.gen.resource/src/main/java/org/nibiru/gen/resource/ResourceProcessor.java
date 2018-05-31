@@ -1,14 +1,14 @@
-package org.nibiru.gen.processor.resource;
+package org.nibiru.gen.resource;
 
 import com.google.common.base.Charsets;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Streams;
 import com.google.common.hash.Hashing;
 import com.google.common.io.BaseEncoding;
 import com.google.common.io.ByteStreams;
 import com.squareup.javapoet.*;
 import org.nibiru.gen.api.resource.Resource;
-import org.nibiru.gen.processor.BaseProcessor;
+import org.nibiru.gen.core.BaseProcessor;
 
 import javax.annotation.Nullable;
 import javax.annotation.processing.SupportedAnnotationTypes;
@@ -30,7 +30,6 @@ import java.io.InputStream;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @SupportedAnnotationTypes("org.nibiru.gen.api.resource.Resource")
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
@@ -84,16 +83,13 @@ public class ResourceProcessor
                     propertysufix);
         }
 
-        return Streams.concat(types.entrySet()
-                        .stream()
-                        .map(e -> buildJavaFile(e.getKey(),
+        return FluentIterable.concat(FluentIterable.from(types.entrySet())
+                        .transform(e -> buildJavaFile(e.getKey(),
                                 e.getValue())),
-                byteArrayResources.values()
-                        .stream(),
-                stringResources.values()
-                        .stream())
+                byteArrayResources.values(),
+                stringResources.values())
                 .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private boolean isString(TypeMirror type) {

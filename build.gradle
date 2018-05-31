@@ -35,4 +35,9 @@ subprojects {
         }
     }
 
+    dependencies {
+        compile 'com.google.code.findbugs:jsr305:3.0.2'
+        compile 'com.google.guava:guava:20.0'
+        compile 'com.squareup:javapoet:1.11.0'
+    }
 }

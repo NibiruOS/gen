@@ -1,11 +1,11 @@
-package org.nibiru.gen.processor.i18n;
+package org.nibiru.gen.i18n;
 
 import com.google.common.collect.Lists;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.TypeSpec;
 import org.nibiru.gen.api.i18n.Messages;
-import org.nibiru.gen.processor.BaseProcessor;
+import org.nibiru.gen.core.BaseProcessor;
 
 import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;

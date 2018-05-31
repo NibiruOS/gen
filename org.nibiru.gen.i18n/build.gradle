@@ -1,0 +1,4 @@
+dependencies {
+    compile project(":org.nibiru.gen.api")
+    compile project(":org.nibiru.gen.core")
+}

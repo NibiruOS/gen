@@ -1,4 +1,4 @@
-package org.nibiru.gen.processor;
+package org.nibiru.gen.core;
 
 
 import com.google.common.base.Joiner;

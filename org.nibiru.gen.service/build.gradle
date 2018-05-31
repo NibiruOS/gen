@@ -1,0 +1,6 @@
+dependencies {
+    compile project(":org.nibiru.gen.api")
+    compile project(":org.nibiru.gen.core")
+    compile "io.github.nibiruos.mobile:org.nibiru.mobile.core:0.4-SNAPSHOT"
+    compile 'javax.ws.rs:javax.ws.rs-api:2.1'
+}
