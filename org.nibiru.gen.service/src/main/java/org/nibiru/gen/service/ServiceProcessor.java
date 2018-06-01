@@ -2,6 +2,7 @@ package org.nibiru.gen.service;
 
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -48,6 +49,7 @@ public class ServiceProcessor
                     HEAD.class, HttpMethod.HEAD,
                     POST.class, HttpMethod.POST,
                     PUT.class, HttpMethod.PUT);
+    private static final String GETTER_PREFIX = "get";
 
     public ServiceProcessor() {
         super(Path.class);
@@ -101,7 +103,7 @@ public class ServiceProcessor
                         .addStatement(FIELD_INIT, REMOTE_SERVICE_NAME, REMOTE_SERVICE_NAME)
                         .addStatement(FIELD_INIT, REQUEST_BUILDER_INTERCEPTOR_NAME, REQUEST_BUILDER_INTERCEPTOR_NAME)
                         .build())
-                .addMethod(MethodSpec.methodBuilder("request")
+                .addMethod(MethodSpec.methodBuilder("requestBuilder")
                         .addModifiers(Modifier.PRIVATE)
                         .addParameter(String.class, "path")
                         .addParameter(ParameterSpec.builder(Object.class, "requestDto")
@@ -113,8 +115,8 @@ public class ServiceProcessor
                                 "                .contentType(com.google.common.net.MediaType.JSON_UTF_8);\n" +
                                 "        return (requestBuilderInterceptor != null\n" +
                                 "                ? requestBuilderInterceptor.apply(builder)\n" +
-                                "                : builder).build()")
-                        .returns(HttpRequest.class)
+                                "                : builder)")
+                        .returns(HttpRequest.Builder.class)
                         .build());
     }
 
@@ -137,18 +139,88 @@ public class ServiceProcessor
         checkState(returnType.toString().startsWith(Promise.class.getName() + "<"),
                 "Method must return an instance of %s", Promise.class);
 
-        methodBuilder.addStatement("return service.invoke(request($S, "
-                        + "$L, "
-                        + "org.nibiru.mobile.core.api.http.HttpMethod.$L), "
-                        + "$L.class)",
-                path.value(),
-                params.size() == 1
-                        ? params.get(0).getSimpleName()
-                        : "null",
-                httpMethod(element),
-                returnType.getTypeArguments().get(0));
+        HttpMethod httpMethod = httpMethod(element);
+
+        DeclaredType returnDt = (DeclaredType) returnType.getTypeArguments().get(0);
+        String dtoReturnType = returnDt.getTypeArguments().isEmpty()
+                ? returnDt + ".class"
+                : "org.nibiru.mobile.core.api.serializer.TypeLiteral.create("
+                + Splitter.on('<').split(returnDt.toString()).iterator().next()
+                + ".class, "
+                + Joiner.on(',').join(returnDt.getTypeArguments()
+                .stream()
+                .map((o) -> o + ".class")
+                .collect(Collectors.toList()))
+                + ")";
+
+        if (httpMethod == HttpMethod.POST || httpMethod == HttpMethod.PUT) {
+            methodBuilder.addStatement("return service.invoke(requestBuilder($S, "
+                            + "$L, "
+                            + "org.nibiru.mobile.core.api.http.HttpMethod.$L).build(), "
+                            + "$L)",
+                    path.value(),
+                    params.size() == 1
+                            ? name(params.get(0))
+                            : "null",
+                    httpMethod,
+                    dtoReturnType);
+        } else {
+            Map<String, String> urlParams = Maps.newHashMap();
+            for (VariableElement arg : element.getParameters()) {
+                TypeMirror argType = arg.asType();
+                if (argType.getKind().isPrimitive()) {
+                    urlParams.put(name(arg), stringExpression(name(arg), argType));
+                } else {
+                    TypeElement typeElement = (TypeElement) arg;
+                    ElementFilter.fieldsIn(typeElement.getEnclosedElements())
+                            .stream()
+                            .filter((v) -> v.getModifiers()
+                                    .contains(Modifier.PUBLIC))
+                            .forEach((v) -> urlParams.put(name(v),
+                                    stringExpression(name(arg) + "." + name(v), v.asType())));
+                    ElementFilter.methodsIn(typeElement.getEnclosedElements())
+                            .stream()
+                            .filter((m) -> m.getModifiers()
+                                    .contains(Modifier.PUBLIC)
+                                    && name(m).startsWith(GETTER_PREFIX))
+                            .forEach((m) -> urlParams.put(getterName(m),
+                                    stringExpression(name(arg) + "." + name(m) + "()", m.getReturnType())));
+                }
+            }
+
+            methodBuilder.addStatement("return service.invoke(requestBuilder($S, "
+                            + "null, "
+                            + "org.nibiru.mobile.core.api.http.HttpMethod.$L)"
+                            + "$L"
+                            + ".build(), "
+                            + "$L)",
+                    path.value(),
+                    httpMethod,
+                    Joiner.on("").join(urlParams.entrySet()
+                            .stream()
+                            .map((e) -> ".queryParam(\"" + e.getKey() + "\", " + e.getValue() + ")\n")
+                            .collect(Collectors.toList())),
+                    dtoReturnType);
+
+        }
 
         builder.addMethod(methodBuilder.build());
+    }
+
+    private String name(Element element) {
+        return element.getSimpleName()
+                .toString();
+    }
+
+    private String getterName(Element element) {
+        String name = name(element).substring(GETTER_PREFIX.length());
+        return name.substring(0, 1).toLowerCase() + name.substring(1);
+    }
+
+    private String stringExpression(String expr, TypeMirror type) {
+        return isString(type)
+                ? expr
+                : "String.valueOf(" + expr + ")";
     }
 
     private HttpMethod httpMethod(ExecutableElement element) {

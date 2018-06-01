@@ -19,7 +19,6 @@ import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.ArrayType;
-import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.ElementFilter;
@@ -30,6 +29,7 @@ import java.io.InputStream;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @SupportedAnnotationTypes("org.nibiru.gen.api.resource.Resource")
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
@@ -83,20 +83,15 @@ public class ResourceProcessor
                     propertysufix);
         }
 
-        return FluentIterable.concat(FluentIterable.from(types.entrySet())
-                        .transform(e -> buildJavaFile(e.getKey(),
-                                e.getValue())),
+        return FluentIterable.concat(types.entrySet()
+                        .stream()
+                        .map(e -> buildJavaFile(e.getKey(),
+                                e.getValue()))
+                        .collect(Collectors.toList()),
                 byteArrayResources.values(),
                 stringResources.values())
                 .filter(Objects::nonNull)
                 .toList();
-    }
-
-    private boolean isString(TypeMirror type) {
-        return type instanceof DeclaredType
-                && String.class
-                .getName()
-                .equals(type.toString());
     }
 
     private boolean isByteArray(TypeMirror type) {

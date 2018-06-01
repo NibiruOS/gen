@@ -13,6 +13,8 @@ import javax.annotation.Nullable;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.lang.model.element.*;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeMirror;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardLocation;
@@ -104,6 +106,13 @@ public abstract class BaseProcessor extends AbstractProcessor {
     }
 
     protected abstract Iterable<JavaFile> generate(Set<? extends Element> elements);
+
+    protected static boolean isString(TypeMirror type) {
+        return type instanceof DeclaredType
+                && String.class
+                .getName()
+                .equals(type.toString());
+    }
 
     protected static MethodSpec.Builder buildMethod(ExecutableElement executableElement) {
         MethodSpec.Builder methodBuilder = MethodSpec.methodBuilder(executableElement
