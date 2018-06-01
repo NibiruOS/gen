@@ -171,14 +171,14 @@ public class ServiceProcessor
                 if (argType.getKind().isPrimitive()) {
                     urlParams.put(name(arg), stringExpression(name(arg), argType));
                 } else {
-                    TypeElement typeElement = (TypeElement) arg;
-                    ElementFilter.fieldsIn(typeElement.getEnclosedElements())
+                    DeclaredType argDeclaredType = (DeclaredType) argType;
+                    ElementFilter.fieldsIn(argDeclaredType.asElement().getEnclosedElements())
                             .stream()
                             .filter((v) -> v.getModifiers()
                                     .contains(Modifier.PUBLIC))
                             .forEach((v) -> urlParams.put(name(v),
                                     stringExpression(name(arg) + "." + name(v), v.asType())));
-                    ElementFilter.methodsIn(typeElement.getEnclosedElements())
+                    ElementFilter.methodsIn(argDeclaredType.asElement().getEnclosedElements())
                             .stream()
                             .filter((m) -> m.getModifiers()
                                     .contains(Modifier.PUBLIC)
